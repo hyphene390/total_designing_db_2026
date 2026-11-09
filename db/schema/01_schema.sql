@@ -118,7 +118,8 @@ CREATE TABLE product (
     CONSTRAINT product_name_not_blank        CHECK (trim(product_name) != ''),
     CONSTRAINT product_description_not_blank CHECK (trim(description) != ''),
     CONSTRAINT product_price_not_negative    CHECK (price >= 0),
-    CONSTRAINT product_rating_range          CHECK (rating BETWEEN 0 AND 5)
+    CONSTRAINT product_rating_range          CHECK (rating BETWEEN 0 AND 5),
+    CONSTRAINT product_photo_url_not_blank   CHECK (photo_url IS NULL OR trim(photo_url) != '')
 );
 
 CREATE TABLE "order" (
@@ -205,6 +206,7 @@ CREATE TABLE review (
     CONSTRAINT review_one_per_entity_in_order
         UNIQUE (entity_type, entity_id, order_id),
     CONSTRAINT review_description_not_blank CHECK (trim(description) != ''),
+    CONSTRAINT review_photo_url_not_blank   CHECK (photo_url IS NULL OR trim(photo_url) != ''),
     CONSTRAINT review_rating_range CHECK (rating BETWEEN 1 AND 5)
 );
 
