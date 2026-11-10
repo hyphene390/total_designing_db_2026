@@ -21,12 +21,8 @@ BEGIN
         RAISE EXCEPTION 'add_product: категория % не существует', p_product_category_id;
     END IF;
 
-    IF p_rating IS NOT NULL THEN
-        RAISE NOTICE 'add_product: рейтинг % не сохранён — у нового блюда нет отзывов, рейтинг = NULL (BR-9.7)', p_rating;
-    END IF;
-
     INSERT INTO product (product_name, product_category_id, price, restaurant_id,
                          photo_url, rating, status, description)
     VALUES (p_name, p_product_category_id, p_price, p_restaurant_id,
-            p_photo_url, NULL, p_status, p_description);
+            p_photo_url, p_rating, p_status, p_description);
 END $$;
