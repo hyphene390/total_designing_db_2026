@@ -145,6 +145,8 @@ UNIQUE (order_id, total_amount).
 | `product` | `price` | `price >= 0` | BR-5.3 | цена неотрицательна, бесплатный соус допустим |
 | `product` | `rating` | `rating BETWEEN 0 AND 5` | BR-5.4 | диапазон рейтинга |
 | `product` | `photo_url` | `photo_url IS NULL OR trim(photo_url) != ''` | BR-5.6, BR-11.3 | фото необязательно, но пустой строкой быть не может |
+| `"order"` | `commission` | `commission = round(order_amount * 0.10, 2)` | BR-1.4, BR-7.10 | комиссия ровно 10% от стоимости блюд, с округлением до копеек |
+| `"order"` | `total_amount` | `total_amount = order_amount + commission` | BR-7.10 | общая сумма складывается из стоимости блюд и комиссии |
 | `"order"` | `total_amount` | `total_amount >= 1000` | BR-1.8, BR-7.11 | минимум 1000 ₽; отдельный CHECK на `order_amount` не нужен, он отсюда следует |
 | `"order"` | `status`, `delivery_timestamp` | `(status = 'доставлен') = (delivery_timestamp IS NOT NULL)` | BR-7.12, BR-11.3 | время доставки есть только у доставленного заказа |
 | `"order"` | `delivery_timestamp` | `delivery_timestamp >= order_timestamp` | BR-7.13 | доставка не раньше создания |
@@ -242,10 +244,8 @@ UNIQUE (order_id, total_amount).
 | `"order"` | `status` | `DEFAULT 'создан'` | BR-7.7: первый статус |
 | `"order"` | `pay_status` | `DEFAULT 'ожидает'` | BR-8.7: попыток ещё нет |
 | `review` | `review_timestamp` | `DEFAULT localtimestamp` | BR-9.3, BR-11.2 |
-| `"order"` | `commission` | `GENERATED ALWAYS AS (round(order_amount * 0.10, 2)) STORED` | BR-1.4, BR-7.10 |
-| `"order"` | `total_amount` | `GENERATED ALWAYS AS (order_amount + round(order_amount * 0.10, 2)) STORED` | BR-7.10 |
 
-`commission` и `total_amount` считает сама база, поэтому они не расходятся с `order_amount`. Формула комиссии повторена в `total_amount`, потому что вычисляемый столбец не может ссылаться на другой вычисляемый. `STORED` нужен, потому что на `total_amount` ссылается FK из `payment`.
+GENERATED не использовал. `commission` и `total_amount` обычные столбцы, суммы передаёт тот, кто создаёт заказ, а два CHECK из раздела выше не дают сохранить значения, которые не сходятся с `order_amount`. Выбрал CHECK, потому что так проще: ограничения те же, что и везде в схеме. Если меняется `order_amount`, все три суммы нужно обновить одной командой.
 
 ---
 
@@ -260,8 +260,8 @@ amount от тройки "курьер, год, месяц".
 в "order" только их id
 
 Особые случаи:
-- commission и total_amount зависят от order_amount. Это GENERATED-столбцы,
-  записать неверное значение нельзя (см. DEFAULT и GENERATED).
+- commission и total_amount зависят от order_amount. Хранятся, потому что они
+  есть в ERD, а записать неверное значение не дают два CHECK (см. DEFAULT и GENERATED).
 - product.rating и restaurant.rating хранятся готовыми, чтобы не считать среднее
   при каждом показе меню. Обновляет их триггер rating_change.
 - review.entity_id + entity_type: полиморфная ссылка, см. ловушку 4.
