@@ -131,10 +131,8 @@ CREATE TABLE "order" (
     order_timestamp    timestamp        NOT NULL DEFAULT localtimestamp,
     delivery_timestamp timestamp,
     order_amount       numeric(12,2)    NOT NULL,
-    commission         numeric(12,2)    NOT NULL
-        GENERATED ALWAYS AS (round(order_amount * 0.10, 2)) STORED,
-    total_amount       numeric(12,2)    NOT NULL
-        GENERATED ALWAYS AS (order_amount + round(order_amount * 0.10, 2)) STORED,
+    commission         numeric(12,2)    NOT NULL,
+    total_amount       numeric(12,2)    NOT NULL,
     status             order_status     NOT NULL DEFAULT 'создан',
     pay_status         order_pay_status NOT NULL DEFAULT 'ожидает',
     description        text             NOT NULL,
@@ -150,6 +148,8 @@ CREATE TABLE "order" (
         REFERENCES client_address (client_id, address_id) ON DELETE RESTRICT,
     CONSTRAINT order_id_client_uq UNIQUE (order_id, client_id),
     CONSTRAINT order_id_total_uq  UNIQUE (order_id, total_amount),
+    CONSTRAINT order_commission_10_percent CHECK (commission = round(order_amount * 0.10, 2)),
+    CONSTRAINT order_total_is_sum         CHECK (total_amount = order_amount + commission),
     CONSTRAINT order_total_min            CHECK (total_amount >= 1000),
     CONSTRAINT order_delivered_has_time
         CHECK ((status = 'доставлен') = (delivery_timestamp IS NOT NULL)),

@@ -195,6 +195,7 @@ BEGIN
 
         INSERT INTO "order" (order_id, courier_id, client_id, address_id, restaurant_id,
                              order_timestamp, delivery_timestamp, order_amount,
+                             commission, total_amount,
                              status, pay_status, description)
         VALUES (v_order_id,
                 v_couriers[v_courier],
@@ -204,6 +205,8 @@ BEGIN
                 v_order_ts,
                 v_delivery_ts,
                 v_amount,
+                round(v_amount * 0.10, 2),
+                v_amount + round(v_amount * 0.10, 2),
                 v_status,
                 'оплачен',
                 repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int));
