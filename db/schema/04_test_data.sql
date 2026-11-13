@@ -4,7 +4,7 @@ SET search_path TO khorunzhii_food, exts;
 CREATE PROCEDURE insert_test_data(value int)
 LANGUAGE plpgsql
 SET search_path = khorunzhii_food, exts
-SET foodexpress.bulk_load = 'on'
+SET session_replication_role = replica
 AS $$
 DECLARE
     v_abc              text      := 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя';
@@ -22,7 +22,6 @@ DECLARE
     v_restaurants      uuid[];
     v_clients          uuid[];
     v_products         uuid[];
-    v_product_prices   numeric[];
     v_orders           uuid[] := '{}';
     v_order_id         uuid;
     v_restaurant       int;
@@ -33,7 +32,9 @@ DECLARE
     v_order_ts         timestamp;
     v_delivery_ts      timestamp;
     v_status           order_status;
-    v_dish_numbers     int[];
+    v_pay_status       order_pay_status;
+    v_menu             uuid[];
+    v_menu_prices      numeric[];
     v_items            uuid[];
     v_prices           numeric[];
     v_qty              numeric[];
@@ -81,9 +82,13 @@ BEGIN
                END
           FROM generate_series(1, value) AS i);
 
-    INSERT INTO courier (courier_id, fio, phone_number, status, hire_date, dismissal_date)
+    INSERT INTO courier (courier_id, last_name, first_name, middle_name, phone_number, status, hire_date, dismissal_date)
     SELECT v_couriers[i],
-           left(repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int), 150),
+           left(repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int), 50),
+           left(repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int), 50),
+           CASE WHEN random() < 0.2 THEN NULL
+                ELSE left(repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int), 50)
+           END,
            '+79' || lpad(floor(random() * 1000000000)::bigint::text, 9, '0'),
            v_courier_statuses[i],
            v_hire_dates[i],
@@ -107,15 +112,18 @@ BEGIN
                repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int) AS description,
                time '06:00' + floor(random() * 13)::int * interval '30 minutes' AS work_start,
                (4 + floor(random() * 8)::int) * interval '1 hour' AS work_length,
-               'ИНН ' || lpad(floor(random() * 10000000000)::bigint::text, 10, '0') AS company_details,
+               lpad(floor(random() * 10000000000)::bigint::text, 10, '0') AS inn,
+               lpad(floor(random() * 10000000000000)::bigint::text, 13, '0') AS ogrn,
+               lpad(floor(random() * 10000000000)::bigint::text, 10, '0')
+                   || lpad(floor(random() * 10000000000)::bigint::text, 10, '0') AS bank_account,
                (enum_range(NULL::restaurant_status))[
                    1 + floor(random() * cardinality(enum_range(NULL::restaurant_status)))::int] AS status
           FROM generate_series(1, value) AS i
     )
     INSERT INTO restaurant (restaurant_id, restaurant_name, address_id, description,
-                            work_start, work_end, company_details, status)
+                            work_start, work_end, inn, ogrn, bank_account, status)
     SELECT nr.restaurant_id, nr.restaurant_name, nr.address_id, nr.description,
-           nr.work_start, nr.work_start + nr.work_length, nr.company_details, nr.status
+           nr.work_start, nr.work_start + nr.work_length, nr.inn, nr.ogrn, nr.bank_account, nr.status
       FROM new_restaurants nr;
 
     INSERT INTO client (client_id, login, password, phone_number)
@@ -130,16 +138,12 @@ BEGIN
     SELECT v_clients[(i - 1) % value + 1], v_addresses[value + i]
       FROM generate_series(1, 4 * value) AS i;
 
-    v_product_prices := ARRAY(
-        SELECT ((10 + floor(random() * 141)::int) * 10)::numeric
-          FROM generate_series(1, 5 * value));
-
     INSERT INTO product (product_id, product_name, product_category_id, price, restaurant_id,
                          photo_url, status, description)
     SELECT v_products[i],
            left(repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int), 100),
            v_categories[1 + floor(random() * value)::int],
-           v_product_prices[i],
+           (10 + floor(random() * 141)::int) * 10,
            v_restaurants[(i - 1) / 5 + 1],
            CASE WHEN random() < 0.3 THEN NULL
                 ELSE 'https://img.foodexpress.example/' || md5(v_products[i]::text) || '.jpg'
@@ -149,91 +153,105 @@ BEGIN
            repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int)
       FROM generate_series(1, 5 * value) AS i;
 
-    FOR k IN 1 .. 5 * value LOOP
-        v_order_id   := exts.uuid_generate_v4();
-        v_restaurant := (k - 1) % value + 1;
-        v_client     := 1 + floor(random() * value)::int;
-        v_courier    := 1 + floor(random() * value)::int;
+    FOR v_restaurant IN 1 .. value LOOP
+        SELECT array_agg(product_id), array_agg(price)
+          INTO v_menu, v_menu_prices
+          FROM product
+         WHERE restaurant_id = v_restaurants[v_restaurant];
 
-        v_work_from := v_hire_dates[v_courier]::timestamp;
-        v_work_to   := CASE WHEN v_dismissal_dates[v_courier] IS NULL THEN v_now
-                            ELSE least(v_now, (v_dismissal_dates[v_courier] + 1)::timestamp) END;
-        v_order_ts  := v_work_from + random() * (v_work_to - v_work_from);
+        FOR j IN 1 .. 5 LOOP
+            v_order_id := exts.uuid_generate_v4();
+            v_client   := 1 + floor(random() * value)::int;
+            v_courier  := 1 + floor(random() * value)::int;
 
-        IF k <= value OR random() < 0.7 THEN
-            v_status := 'доставлен';
-        ELSE
-            v_status := (enum_range(NULL::order_status))[
-                            1 + floor(random() * cardinality(enum_range(NULL::order_status)))::int];
-        END IF;
+            v_work_from := v_hire_dates[v_courier]::timestamp;
+            v_work_to   := CASE WHEN v_dismissal_dates[v_courier] IS NULL THEN v_now
+                                ELSE least(v_now, (v_dismissal_dates[v_courier] + 1)::timestamp) END;
+            v_order_ts  := v_work_from + random() * (v_work_to - v_work_from);
 
-        IF v_status = 'доставлен' THEN
-            v_delivery_ts := least(v_order_ts + (20 + floor(random() * 101)::int) * interval '1 minute', v_work_to);
-        ELSE
-            v_delivery_ts := NULL;
-        END IF;
+            IF j = 1 OR random() < 0.7 THEN
+                v_status := 'доставлен';
+            ELSE
+                v_status := (enum_range(NULL::order_status))[
+                                1 + floor(random() * cardinality(enum_range(NULL::order_status)))::int];
+            END IF;
 
-        v_dish_numbers := ARRAY(SELECT n FROM generate_series(1, 5) AS n
-                                 ORDER BY random()
-                                 LIMIT 1 + floor(random() * 5)::int);
+            IF v_status = 'доставлен' THEN
+                v_delivery_ts := least(v_order_ts + (20 + floor(random() * 101)::int) * interval '1 minute', v_work_to);
+            ELSE
+                v_delivery_ts := NULL;
+            END IF;
 
-        v_items  := '{}';
-        v_prices := '{}';
-        v_qty    := '{}';
-        v_amount := 0;
-        FOR i IN 1 .. cardinality(v_dish_numbers) LOOP
-            v_items  := v_items  || v_products[(v_restaurant - 1) * 5 + v_dish_numbers[i]];
-            v_prices := v_prices || v_product_prices[(v_restaurant - 1) * 5 + v_dish_numbers[i]];
-            v_qty    := v_qty    || (1 + floor(random() * 3))::numeric;
-            v_amount := v_amount + v_qty[i] * v_prices[i];
+            v_pay_status := (enum_range(NULL::order_pay_status))[
+                                1 + floor(random() * cardinality(enum_range(NULL::order_pay_status)))::int];
+
+            SELECT array_agg(t.product_id), array_agg(t.price)
+              INTO v_items, v_prices
+              FROM (SELECT product_id, price
+                      FROM unnest(v_menu, v_menu_prices) AS m(product_id, price)
+                     ORDER BY random()
+                     LIMIT 1 + floor(random() * cardinality(v_menu))::int) t;
+
+            v_qty    := '{}';
+            v_amount := 0;
+            FOR i IN 1 .. cardinality(v_items) LOOP
+                v_qty    := v_qty || (1 + floor(random() * 3))::numeric;
+                v_amount := v_amount + v_qty[i] * v_prices[i];
+            END LOOP;
+
+            WHILE v_amount < 1000 LOOP
+                v_qty[1] := v_qty[1] + 1;
+                v_amount := v_amount + v_prices[1];
+            END LOOP;
+
+            INSERT INTO "order" (order_id, courier_id, client_id, address_id, restaurant_id,
+                                 order_timestamp, delivery_timestamp, order_amount,
+                                 commission, total_amount,
+                                 status, pay_status, description)
+            VALUES (v_order_id,
+                    v_couriers[v_courier],
+                    v_clients[v_client],
+                    v_addresses[value + v_client + value * floor(random() * 4)::int],
+                    v_restaurants[v_restaurant],
+                    v_order_ts,
+                    v_delivery_ts,
+                    v_amount,
+                    round(v_amount * 0.10, 2),
+                    v_amount + round(v_amount * 0.10, 2),
+                    v_status,
+                    v_pay_status,
+                    CASE WHEN random() < 0.8 THEN NULL
+                         ELSE repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int)
+                    END);
+
+            INSERT INTO order_structure (order_id, product_id, quantity)
+            SELECT v_order_id, t.product_id, t.quantity
+              FROM unnest(v_items, v_qty) AS t(product_id, quantity);
+
+            v_review_type := (enum_range(NULL::review_entity_type))[
+                                 1 + floor(random() * cardinality(enum_range(NULL::review_entity_type)))::int];
+            v_review_ts   := coalesce(v_delivery_ts, v_order_ts);
+            v_review_ts   := v_review_ts + random() * (v_now - v_review_ts);
+
+            INSERT INTO review (client_id, review_timestamp, entity_id, entity_type, order_id, description, rating,
+                                photo_url)
+            VALUES (v_clients[v_client],
+                    v_review_ts,
+                    CASE v_review_type
+                        WHEN 'блюдо'    THEN v_items[1]
+                        WHEN 'ресторан' THEN v_restaurants[v_restaurant]
+                        ELSE v_order_id
+                    END,
+                    v_review_type,
+                    v_order_id,
+                    repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int),
+                    1 + floor(random() * 5)::int,
+                    CASE WHEN random() < 0.3 THEN NULL
+                         ELSE 'https://img.foodexpress.example/' || md5(random()::text) || '.jpg'
+                    END);
+
+            v_orders := v_orders || v_order_id;
         END LOOP;
-
-        WHILE v_amount + round(v_amount * 0.10, 2) < 1000 LOOP
-            v_qty[1] := v_qty[1] + 1;
-            v_amount := v_amount + v_prices[1];
-        END LOOP;
-
-        INSERT INTO "order" (order_id, courier_id, client_id, address_id, restaurant_id,
-                             order_timestamp, delivery_timestamp, order_amount,
-                             commission, total_amount,
-                             status, pay_status, description)
-        VALUES (v_order_id,
-                v_couriers[v_courier],
-                v_clients[v_client],
-                v_addresses[value + v_client + value * floor(random() * 4)::int],
-                v_restaurants[v_restaurant],
-                v_order_ts,
-                v_delivery_ts,
-                v_amount,
-                round(v_amount * 0.10, 2),
-                v_amount + round(v_amount * 0.10, 2),
-                v_status,
-                'оплачен',
-                repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int));
-
-        INSERT INTO order_structure (order_id, product_id, quantity)
-        SELECT v_order_id, t.product_id, t.quantity
-          FROM unnest(v_items, v_qty) AS t(product_id, quantity);
-
-        v_review_type := (enum_range(NULL::review_entity_type))[
-                             1 + floor(random() * cardinality(enum_range(NULL::review_entity_type)))::int];
-        v_review_ts   := coalesce(v_delivery_ts, v_order_ts);
-        v_review_ts   := v_review_ts + random() * (v_now - v_review_ts);
-
-        INSERT INTO review (client_id, review_timestamp, entity_id, entity_type, order_id, description, rating)
-        VALUES (v_clients[v_client],
-                v_review_ts,
-                CASE v_review_type
-                    WHEN 'блюдо'    THEN v_items[1]
-                    WHEN 'ресторан' THEN v_restaurants[v_restaurant]
-                    ELSE v_order_id
-                END,
-                v_review_type,
-                v_order_id,
-                repeat(substring(v_abc, 1, 1 + floor(random() * 33)::int), 1 + floor(random() * 3)::int),
-                1 + floor(random() * 5)::int);
-
-        v_orders := v_orders || v_order_id;
     END LOOP;
 
     INSERT INTO payment (order_id, pay_type, amount, transaction_id, transaction_timestamp, status)
@@ -241,9 +259,12 @@ BEGIN
            (enum_range(NULL::payment_type))[
                1 + floor(random() * cardinality(enum_range(NULL::payment_type)))::int],
            o.total_amount,
-           exts.uuid_generate_v4(),
+           exts.uuid_generate_v4()::text,
            o.order_timestamp + random() * (v_now - o.order_timestamp),
-           'успех'
+           CASE o.pay_status WHEN 'оплачен' THEN 'успех'
+                             WHEN 'ошибка'  THEN 'ошибка'
+                             ELSE 'в_обработке'
+           END::payment_status
       FROM "order" o
      WHERE o.order_id = ANY(v_orders);
 
@@ -268,35 +289,41 @@ BEGIN
     LOOP
         v_month_end := v_month_start + interval '1 month';
 
-        INSERT INTO courier_pay (courier_id, year, month, amount, coefficient_used)
-        SELECT c.courier_id,
-               extract(year FROM v_month_start),
-               extract(month FROM v_month_start),
-               round(coalesce(sum(o.commission), 0) * c.coefficient, 2),
-               c.coefficient
-          FROM courier c
-          LEFT JOIN "order" o
-                 ON o.courier_id = c.courier_id
-                AND o.status = 'доставлен'
-                AND o.order_timestamp >= v_month_start
-                AND o.order_timestamp < v_month_end
-         WHERE c.courier_id = ANY(v_couriers)
-         GROUP BY c.courier_id, c.coefficient;
-
+        WITH delivered AS (
+            SELECT courier_id,
+                   sum(commission) AS commission_sum,
+                   count(*)        AS delivered_count
+              FROM "order"
+             WHERE courier_id = ANY(v_couriers)
+               AND status = 'доставлен'
+               AND order_timestamp >= v_month_start
+               AND order_timestamp < v_month_end
+             GROUP BY courier_id
+        ),
+        month_pay AS (
+            SELECT c.courier_id,
+                   c.coefficient,
+                   coalesce(d.commission_sum, 0)  AS commission_sum,
+                   coalesce(d.delivered_count, 0) AS delivered_count
+              FROM courier c
+              LEFT JOIN delivered d ON d.courier_id = c.courier_id
+             WHERE c.courier_id = ANY(v_couriers)
+        ),
+        saved_pay AS (
+            INSERT INTO courier_pay (courier_id, year, month, amount, coefficient_used)
+            SELECT courier_id,
+                   extract(year FROM v_month_start),
+                   extract(month FROM v_month_start),
+                   round(commission_sum * coefficient, 2),
+                   coefficient
+              FROM month_pay
+        )
         UPDATE courier c
            SET coefficient = CASE WHEN m.delivered_count > 500 THEN 0.5
                                   WHEN m.delivered_count > 250 THEN 0.3
                                   WHEN m.delivered_count > 150 THEN 0.2
                                   ELSE 0.1 END
-          FROM (SELECT c2.courier_id, count(o.order_id) AS delivered_count
-                  FROM courier c2
-                  LEFT JOIN "order" o
-                         ON o.courier_id = c2.courier_id
-                        AND o.status = 'доставлен'
-                        AND o.order_timestamp >= v_month_start
-                        AND o.order_timestamp < v_month_end
-                 WHERE c2.courier_id = ANY(v_couriers)
-                 GROUP BY c2.courier_id) m
+          FROM month_pay m
          WHERE c.courier_id = m.courier_id
            AND (c.dismissal_date IS NULL OR c.dismissal_date >= v_month_end);
     END LOOP;
@@ -305,8 +332,6 @@ END $$;
 CREATE PROCEDURE erase_test_data()
 LANGUAGE plpgsql SET search_path = khorunzhii_food, exts AS $$
 BEGIN
-    SET CONSTRAINTS order_has_items, order_structure_keeps_items IMMEDIATE;
     TRUNCATE client, address, client_address, restaurant, courier, courier_pay,
              product_category, product, "order", order_structure, payment, review;
-    SET CONSTRAINTS order_has_items, order_structure_keeps_items DEFERRED;
 END $$;

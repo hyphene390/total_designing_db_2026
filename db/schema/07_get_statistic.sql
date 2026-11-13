@@ -27,10 +27,14 @@ client_orders AS (
      GROUP BY restaurant_id, client_id
 ),
 best_client AS (
-    SELECT restaurant_id,
-           (array_agg(client_id ORDER BY orders_count DESC, random()))[1] AS client_id
-      FROM client_orders
-     GROUP BY restaurant_id
+    SELECT DISTINCT ON (co.restaurant_id) co.restaurant_id, co.client_id
+      FROM client_orders co
+      JOIN (SELECT restaurant_id, max(orders_count) AS max_orders_count
+              FROM client_orders
+             GROUP BY restaurant_id) mx
+        ON mx.restaurant_id = co.restaurant_id
+       AND mx.max_orders_count = co.orders_count
+     ORDER BY co.restaurant_id, random()
 ),
 product_sales AS (
     SELECT dl.restaurant_id, os.product_id, sum(os.quantity) AS sold_quantity
@@ -39,10 +43,14 @@ product_sales AS (
      GROUP BY dl.restaurant_id, os.product_id
 ),
 best_product AS (
-    SELECT restaurant_id,
-           (array_agg(product_id ORDER BY sold_quantity DESC, random()))[1] AS product_id
-      FROM product_sales
-     GROUP BY restaurant_id
+    SELECT DISTINCT ON (ps.restaurant_id) ps.restaurant_id, ps.product_id
+      FROM product_sales ps
+      JOIN (SELECT restaurant_id, max(sold_quantity) AS max_sold_quantity
+              FROM product_sales
+             GROUP BY restaurant_id) mx
+        ON mx.restaurant_id = ps.restaurant_id
+       AND mx.max_sold_quantity = ps.sold_quantity
+     ORDER BY ps.restaurant_id, random()
 )
 SELECT r.restaurant_name::text,
        p.product_name::text,

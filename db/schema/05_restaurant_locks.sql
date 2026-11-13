@@ -5,7 +5,7 @@ CREATE FUNCTION forbid_order_restaurant_change() RETURNS trigger
 LANGUAGE plpgsql SET search_path = khorunzhii_food, exts AS $$
 BEGIN
     IF EXISTS (SELECT 1 FROM order_structure WHERE order_id = NEW.order_id) THEN
-        RAISE EXCEPTION 'BR-7.3: нельзя сменить ресторан у заказа %, в нём уже есть блюда', NEW.order_id;
+        RAISE EXCEPTION 'нельзя сменить ресторан у заказа %, в нём уже есть блюда', NEW.order_id;
     END IF;
     RETURN NEW;
 END $$;
@@ -19,7 +19,7 @@ CREATE FUNCTION forbid_product_restaurant_change() RETURNS trigger
 LANGUAGE plpgsql SET search_path = khorunzhii_food, exts AS $$
 BEGIN
     IF EXISTS (SELECT 1 FROM order_structure WHERE product_id = NEW.product_id) THEN
-        RAISE EXCEPTION 'BR-7.3: нельзя перенести блюдо % в другой ресторан, оно уже есть в заказах', NEW.product_id;
+        RAISE EXCEPTION 'нельзя перенести блюдо % в другой ресторан, оно уже есть в заказах', NEW.product_id;
     END IF;
     RETURN NEW;
 END $$;

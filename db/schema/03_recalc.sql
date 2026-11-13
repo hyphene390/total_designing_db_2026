@@ -4,10 +4,6 @@ SET search_path TO khorunzhii_food, exts;
 CREATE FUNCTION recalc_pay_status() RETURNS trigger
 LANGUAGE plpgsql SET search_path = khorunzhii_food, exts AS $$
 BEGIN
-    IF current_setting('foodexpress.bulk_load', true) = 'on' THEN
-        RETURN NULL;
-    END IF;
-
     UPDATE "order" o
        SET pay_status = (SELECT CASE WHEN bool_or(p.status = 'успех')   THEN 'оплачен'
                                      WHEN bool_and(p.status = 'ошибка') THEN 'ошибка'
@@ -27,21 +23,17 @@ CREATE TRIGGER payment_pay_status
 CREATE FUNCTION rating_change() RETURNS trigger
 LANGUAGE plpgsql SET search_path = khorunzhii_food, exts AS $$
 BEGIN
-    IF current_setting('foodexpress.bulk_load', true) = 'on' THEN
-        RETURN NULL;
-    END IF;
-
     UPDATE product p
        SET rating = (SELECT round(avg(r.rating), 2)
                        FROM review r
                       WHERE r.entity_type = 'блюдо' AND r.entity_id = p.product_id)
-     WHERE p.product_id IN (OLD.entity_id, NEW.entity_id);
+     WHERE p.product_id = coalesce(NEW.entity_id, OLD.entity_id);
 
     UPDATE restaurant s
        SET rating = (SELECT round(avg(r.rating), 2)
                        FROM review r
                       WHERE r.entity_type = 'ресторан' AND r.entity_id = s.restaurant_id)
-     WHERE s.restaurant_id IN (OLD.entity_id, NEW.entity_id);
+     WHERE s.restaurant_id = coalesce(NEW.entity_id, OLD.entity_id);
 
     RETURN NULL;
 END $$;

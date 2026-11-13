@@ -54,7 +54,9 @@ CREATE TABLE restaurant (
     description     text              NOT NULL,
     work_start      time              NOT NULL,
     work_end        time              NOT NULL,
-    company_details text              NOT NULL,
+    inn             varchar(12)       NOT NULL,
+    ogrn            varchar(15)       NOT NULL,
+    bank_account    varchar(20)       NOT NULL,
     rating          numeric(3,2),
     status          restaurant_status NOT NULL,
     CONSTRAINT restaurant_address_uq UNIQUE (address_id),
@@ -62,20 +64,26 @@ CREATE TABLE restaurant (
         REFERENCES address (address_id) ON DELETE RESTRICT,
     CONSTRAINT restaurant_name_not_blank        CHECK (trim(restaurant_name) != ''),
     CONSTRAINT restaurant_description_not_blank CHECK (trim(description) != ''),
-    CONSTRAINT restaurant_details_not_blank     CHECK (trim(company_details) != ''),
+    CONSTRAINT restaurant_inn_not_blank         CHECK (trim(inn) != ''),
+    CONSTRAINT restaurant_ogrn_not_blank        CHECK (trim(ogrn) != ''),
+    CONSTRAINT restaurant_bank_account_not_blank CHECK (trim(bank_account) != ''),
     CONSTRAINT restaurant_work_hours            CHECK (work_end > work_start),
     CONSTRAINT restaurant_rating_range          CHECK (rating BETWEEN 0 AND 5)
 );
 
 CREATE TABLE courier (
     courier_id     uuid           PRIMARY KEY DEFAULT exts.uuid_generate_v4(),
-    fio            varchar(150)   NOT NULL,
+    last_name      varchar(50)    NOT NULL,
+    first_name     varchar(50)    NOT NULL,
+    middle_name    varchar(50),
     phone_number   char(12)       NOT NULL,
     status         courier_status NOT NULL,
     hire_date      date           NOT NULL,
     dismissal_date date,
     coefficient    numeric(2,1)   NOT NULL DEFAULT 0.1,
-    CONSTRAINT courier_fio_not_blank      CHECK (trim(fio) != ''),
+    CONSTRAINT courier_last_name_not_blank   CHECK (trim(last_name) != ''),
+    CONSTRAINT courier_first_name_not_blank  CHECK (trim(first_name) != ''),
+    CONSTRAINT courier_middle_name_not_blank CHECK (middle_name IS NULL OR trim(middle_name) != ''),
     CONSTRAINT courier_coefficient_range  CHECK (coefficient BETWEEN 0.1 AND 0.5),
     CONSTRAINT courier_dismissed_has_date CHECK (status != 'уволен' OR dismissal_date IS NOT NULL),
     CONSTRAINT courier_dismissal_after_hire CHECK (dismissal_date >= hire_date)
@@ -85,7 +93,7 @@ CREATE TABLE courier_pay (
     courier_id       uuid          NOT NULL,
     year             int           NOT NULL,
     month            smallint      NOT NULL,
-    amount           numeric(12,2) NOT NULL,
+    amount           numeric(8,2)  NOT NULL,
     coefficient_used numeric(2,1)  NOT NULL,
     CONSTRAINT courier_pay_pk PRIMARY KEY (courier_id, year, month),
     CONSTRAINT courier_pay_courier_fk FOREIGN KEY (courier_id)
@@ -105,7 +113,7 @@ CREATE TABLE product (
     product_id          uuid           PRIMARY KEY DEFAULT exts.uuid_generate_v4(),
     product_name        varchar(100)   NOT NULL,
     product_category_id uuid           NOT NULL,
-    price               numeric(10,2)  NOT NULL,
+    price               numeric(6,2)   NOT NULL,
     restaurant_id       uuid           NOT NULL,
     photo_url           text,
     rating              numeric(3,2),
@@ -130,12 +138,12 @@ CREATE TABLE "order" (
     restaurant_id      uuid             NOT NULL,
     order_timestamp    timestamp        NOT NULL DEFAULT localtimestamp,
     delivery_timestamp timestamp,
-    order_amount       numeric(12,2)    NOT NULL,
-    commission         numeric(12,2)    NOT NULL,
-    total_amount       numeric(12,2)    NOT NULL,
+    order_amount       numeric(8,2)     NOT NULL,
+    commission         numeric(8,2)     NOT NULL,
+    total_amount       numeric(8,2)     NOT NULL,
     status             order_status     NOT NULL DEFAULT 'создан',
     pay_status         order_pay_status NOT NULL DEFAULT 'ожидает',
-    description        text             NOT NULL,
+    description        text,
     CONSTRAINT order_courier_fk    FOREIGN KEY (courier_id)
         REFERENCES courier (courier_id) ON DELETE RESTRICT,
     CONSTRAINT order_client_fk     FOREIGN KEY (client_id)
@@ -150,11 +158,11 @@ CREATE TABLE "order" (
     CONSTRAINT order_id_total_uq  UNIQUE (order_id, total_amount),
     CONSTRAINT order_commission_10_percent CHECK (commission = round(order_amount * 0.10, 2)),
     CONSTRAINT order_total_is_sum         CHECK (total_amount = order_amount + commission),
-    CONSTRAINT order_total_min            CHECK (total_amount >= 1000),
+    CONSTRAINT order_amount_min           CHECK (order_amount >= 1000),
     CONSTRAINT order_delivered_has_time
         CHECK ((status = 'доставлен') = (delivery_timestamp IS NOT NULL)),
     CONSTRAINT order_delivery_after_order CHECK (delivery_timestamp >= order_timestamp),
-    CONSTRAINT order_description_not_blank CHECK (trim(description) != '')
+    CONSTRAINT order_description_not_blank CHECK (description IS NULL OR trim(description) != '')
 );
 
 CREATE TABLE order_structure (
@@ -173,15 +181,16 @@ CREATE TABLE payment (
     payment_id            uuid           PRIMARY KEY DEFAULT exts.uuid_generate_v4(),
     order_id              uuid           NOT NULL,
     pay_type              payment_type   NOT NULL,
-    amount                numeric(12,2)  NOT NULL,
-    transaction_id        uuid           NOT NULL,
+    amount                numeric(8,2)   NOT NULL,
+    transaction_id        text           NOT NULL,
     transaction_timestamp timestamp      NOT NULL,
     status                payment_status NOT NULL,
     CONSTRAINT payment_order_fk FOREIGN KEY (order_id)
         REFERENCES "order" (order_id) ON DELETE RESTRICT,
     CONSTRAINT payment_amount_matches_order FOREIGN KEY (order_id, amount)
-        REFERENCES "order" (order_id, total_amount),
-    CONSTRAINT payment_transaction_uq UNIQUE (transaction_id)
+        REFERENCES "order" (order_id, total_amount) ON DELETE RESTRICT,
+    CONSTRAINT payment_transaction_uq UNIQUE (transaction_id),
+    CONSTRAINT payment_transaction_not_blank CHECK (trim(transaction_id) != '')
 );
 CREATE UNIQUE INDEX payment_one_success_uq ON payment (order_id) WHERE status = 'успех';
 
@@ -200,7 +209,7 @@ CREATE TABLE review (
     CONSTRAINT review_order_fk FOREIGN KEY (order_id)
         REFERENCES "order" (order_id) ON DELETE RESTRICT,
     CONSTRAINT review_order_client_fk FOREIGN KEY (order_id, client_id)
-        REFERENCES "order" (order_id, client_id),
+        REFERENCES "order" (order_id, client_id) ON DELETE RESTRICT,
     CONSTRAINT review_order_entity_is_this_order
         CHECK (entity_type != 'заказ' OR entity_id = order_id),
     CONSTRAINT review_one_per_entity_in_order

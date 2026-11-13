@@ -9,7 +9,7 @@ BEGIN
                      JOIN "order" o ON o.restaurant_id = p.restaurant_id
                     WHERE p.product_id = NEW.product_id
                       AND o.order_id = NEW.order_id) THEN
-        RAISE EXCEPTION 'BR-7.3: блюдо % не из ресторана заказа %', NEW.product_id, NEW.order_id;
+        RAISE EXCEPTION 'блюдо % не из ресторана заказа %', NEW.product_id, NEW.order_id;
     END IF;
     RETURN NULL;
 END $$;
@@ -31,7 +31,7 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM "order" WHERE order_id = v_order_id)
        AND NOT EXISTS (SELECT 1 FROM order_structure WHERE order_id = v_order_id) THEN
-        RAISE EXCEPTION 'BR-7.14: заказ % остался без позиций', v_order_id;
+        RAISE EXCEPTION 'заказ % остался без позиций', v_order_id;
     END IF;
     RETURN NULL;
 END $$;
@@ -52,10 +52,10 @@ BEGIN
     IF NEW.entity_type = 'блюдо' AND NOT EXISTS (
            SELECT 1 FROM order_structure
             WHERE order_id = NEW.order_id AND product_id = NEW.entity_id) THEN
-        RAISE EXCEPTION 'BR-9.2: блюда % нет в заказе %', NEW.entity_id, NEW.order_id;
+        RAISE EXCEPTION 'блюда % нет в заказе %', NEW.entity_id, NEW.order_id;
     ELSIF NEW.entity_type = 'ресторан' AND NEW.entity_id IS DISTINCT FROM (
            SELECT restaurant_id FROM "order" WHERE order_id = NEW.order_id) THEN
-        RAISE EXCEPTION 'BR-9.2: ресторан % не является рестораном заказа %', NEW.entity_id, NEW.order_id;
+        RAISE EXCEPTION 'ресторан % не является рестораном заказа %', NEW.entity_id, NEW.order_id;
     END IF;
     RETURN NULL;
 END $$;

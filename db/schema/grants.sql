@@ -12,6 +12,7 @@ ALTER ROLE inspector LOGIN PASSWORD 'NetoSQL2025';
 GRANT ALL ON SCHEMA khorunzhii_food TO inspector;
 GRANT ALL ON ALL TABLES IN SCHEMA khorunzhii_food TO inspector;
 GRANT EXECUTE ON ALL ROUTINES IN SCHEMA khorunzhii_food TO inspector;
+GRANT SET ON PARAMETER session_replication_role TO inspector;
 
 GRANT USAGE ON SCHEMA exts TO inspector;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA exts TO inspector;
